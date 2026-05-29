@@ -1,0 +1,138 @@
+/* ══════════════════════════════════════════════
+   Custom Dashboard Plugin — style.css
+   ══════════════════════════════════════════════ */
+
+/* ── Cartões de resumo ────────────────────────── */
+.cd-card {
+    border: none !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.cd-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
+}
+.cd-card-estoque  { border-left: 4px solid #4263eb !important; }
+.cd-card-manut    { border-left: 4px solid #f76707 !important; }
+.cd-card-alugadas { border-left: 4px solid #2fb344 !important; }
+
+.cd-card-icon {
+    width: 52px; height: 52px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; flex-shrink: 0;
+}
+.cd-card-value {
+    font-size: 2rem; font-weight: 700; line-height: 1.1; color: #1a1a2e;
+}
+.cd-card-label { font-size: 0.82rem; color: #6b7280; margin-top: 2px; }
+
+/* ── Cards genéricos ──────────────────────────── */
+.cd-dashboard .card {
+    border-radius: 12px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    border: 1px solid rgba(0,0,0,0.06);
+}
+.cd-dashboard .card-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    padding: 1rem 1.25rem;
+}
+
+/* ── Tabela de status por localidade ──────────── */
+.cd-table-status thead th { font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: #6b7280; font-weight: 600; }
+.cd-table-status tbody tr:hover { background: rgba(66,99,235,0.04); }
+
+/* ── Legenda do gráfico ───────────────────────── */
+.cd-legend-dot {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.82rem; font-weight: 500; color: #374151;
+}
+.cd-legend-dot::before {
+    content: ''; display: inline-block;
+    width: 10px; height: 10px; border-radius: 3px;
+    background: var(--c);
+}
+
+/* ── Cartão de contrato ───────────────────────── */
+.cd-contract-card {
+    border-left: 4px solid #4263eb !important;
+    transition: box-shadow 0.15s;
+}
+.cd-contract-card:hover {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1) !important;
+}
+.cd-contract-header {
+    background: linear-gradient(135deg, rgba(66,99,235,0.04), rgba(255,255,255,0));
+}
+
+/* ── Barra empilhada de status ────────────────── */
+.cd-stacked-bar {
+    display: flex; height: 10px; border-radius: 8px;
+    overflow: hidden; background: #e5e7eb; gap: 1px;
+}
+.cd-stacked-segment {
+    height: 100%; transition: opacity 0.2s;
+    min-width: 2px;
+}
+.cd-stacked-segment:hover { opacity: 0.75; cursor: default; }
+
+/* ── Legenda de status (contrato) ─────────────── */
+.cd-legend-item {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.85rem;
+}
+.cd-legend-swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 3px; flex-shrink: 0;
+}
+
+/* ── Tabela de localidades por contrato ───────── */
+.cd-contract-table thead th {
+    font-size: 0.77rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: #6b7280;
+    background: #f9fafb; font-weight: 600;
+    white-space: nowrap;
+}
+.cd-contract-table tbody tr:hover { background: rgba(66,99,235,0.03); }
+.cd-col-bar { width: 140px; }
+
+/* Cabeçalho de coluna de status: ponto colorido + texto neutro */
+.cd-col-header {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.75rem; text-transform: uppercase;
+    letter-spacing: 0.04em; font-weight: 600; color: #374151;
+}
+.cd-col-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; flex-shrink: 0;
+}
+
+/* ── Dropdown de filtro de colunas ───────────── */
+.cd-filter-menu {
+    min-width: 200px;
+    max-height: 340px;
+    overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,0.08);
+}
+.cd-filter-menu .form-check-input {
+    cursor: pointer;
+}
+.cd-filter-menu .form-check-label {
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+/* ── Mini barra por linha de localidade ───────── */
+.cd-mini-bar {
+    display: flex; height: 8px; border-radius: 4px;
+    overflow: hidden; gap: 1px; background: #e5e7eb;
+}
+.cd-mini-bar > div {
+    height: 100%; transition: opacity 0.2s;
+}
+.cd-mini-bar > div:hover { opacity: 0.7; }
