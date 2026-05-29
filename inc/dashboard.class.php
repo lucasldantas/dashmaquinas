@@ -205,6 +205,137 @@ class PluginCustomdashboardDashboard extends CommonGLPI {
         return $contracts;
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  HISTÓRICO DE ESTOQUE (snapshots mensais)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /** Paleta de cores para as linhas do gráfico histórico. */
+    private static array $history_colors = [
+        '#4263eb', '#2fb344', '#f76707', '#7048e8', '#1098ad',
+        '#f59f00', '#d6336c', '#0ca678', '#ea580c', '#7c3aed',
+    ];
+
+    /**
+     * Retorna mapa location → cor hex para uso no gráfico.
+     * Usa a mesma paleta de $history_colors para consistência.
+     */
+    static function getLocationColors(array $locations): array {
+        $result = [];
+        $n = count(self::$history_colors);
+        foreach (array_values($locations) as $i => $loc) {
+            $result[$loc] = self::$history_colors[$i % $n];
+        }
+        return $result;
+    }
+
+    /**
+     * Tira um snapshot do Estoque atual por localidade e grava na tabela de histórico.
+     * Se já existe registro para o mês corrente, atualiza (idempotente).
+     * Retorna quantas localidades foram gravadas.
+     */
+    static function takeSnapshot(int $entities_id = 0): int {
+        global $DB;
+
+        plugin_customdashboard_create_history_table();
+
+        $today = date('Y-m-d');
+        $now   = date('Y-m-d H:i:s');
+
+        $iterator = $DB->request([
+            'SELECT' => [
+                self::qe("COALESCE(`l`.`name`, 'Sem localizacao') AS `location`"),
+                self::qe('COUNT(`c`.`id`) AS `total`'),
+            ],
+            'FROM'      => 'glpi_computers AS c',
+            'LEFT JOIN' => [
+                'glpi_states AS s'    => ['FKEY' => ['s' => 'id', 'c' => 'states_id']],
+                'glpi_locations AS l' => ['FKEY' => ['l' => 'id', 'c' => 'locations_id']],
+            ],
+            'WHERE'   => [
+                's.name'        => 'Estoque',
+                'c.is_deleted'  => 0,
+                'c.is_template' => 0,
+            ],
+            'GROUPBY' => ['c.locations_id', 'l.name'],
+        ]);
+
+        $count = 0;
+        foreach ($iterator as $row) {
+            $existing = $DB->request([
+                'SELECT' => ['id'],
+                'FROM'   => 'glpi_plugin_customdashboard_stockhistory',
+                'WHERE'  => ['location_name' => $row['location'], 'snapshot_date' => $today],
+            ])->current();
+
+            $data = ['estoque_count' => (int)$row['total'], 'entities_id' => $entities_id];
+
+            if ($existing) {
+                $DB->update('glpi_plugin_customdashboard_stockhistory',
+                            $data, ['id' => (int)$existing['id']]);
+            } else {
+                $DB->insert('glpi_plugin_customdashboard_stockhistory', array_merge($data, [
+                    'location_name' => $row['location'],
+                    'snapshot_date' => $today,
+                    'date_creation' => $now,
+                ]));
+            }
+            $count++;
+        }
+        return $count;
+    }
+
+    /**
+     * Retorna os snapshots de estoque como array plano — sem agregação.
+     * A filtragem e agrupamento (7 dias / 30 dias / mensal) são feitos no cliente (JS).
+     *
+     * Retorno:
+     *   [ ['date' => 'YYYY-MM-DD', 'location' => '...', 'count' => N], ... ]
+     */
+    static function getStockHistory(): array {
+        global $DB;
+
+        if (!$DB->tableExists('glpi_plugin_customdashboard_stockhistory')) {
+            return [];
+        }
+
+        $iterator = $DB->request([
+            'SELECT' => ['location_name', 'snapshot_date', 'estoque_count'],
+            'FROM'   => 'glpi_plugin_customdashboard_stockhistory',
+            'ORDER'  => ['snapshot_date ASC'],
+        ]);
+
+        $rows = [];
+        foreach ($iterator as $row) {
+            $rows[] = [
+                'date'     => $row['snapshot_date'],
+                'location' => $row['location_name'],
+                'count'    => (int)$row['estoque_count'],
+            ];
+        }
+        return $rows;
+    }
+
+    // ── Cron ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Executado pelo cron mensal do GLPI.
+     */
+    static function cronStocksnapshot(CronTask $task): int {
+        $count = self::takeSnapshot(0);
+        $task->addVolume($count);
+        return $count > 0 ? 1 : 0;
+    }
+
+    /**
+     * Descrição da tarefa cron exibida no painel de agendamento do GLPI.
+     */
+    static function cronInfo(string $name): array {
+        return match($name) {
+            'stocksnapshot' => ['description' => 'Snapshot mensal do estoque de máquinas por localidade'],
+            default         => [],
+        };
+    }
+
     /**
      * Retorna totais gerais para os cartões de resumo.
      */

@@ -3,9 +3,22 @@ include('../../../inc/includes.php');
 
 Session::checkRight('computer', READ);
 
+// ── Snapshot manual (POST) ─────────────────────────────────────────────────
+$snapshot_alert = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'snapshot') {
+    try {
+        $eid_snap      = (int)($_SESSION['glpiactive_entity'] ?? 0);
+        $n             = PluginCustomdashboardDashboard::takeSnapshot($eid_snap);
+        $snapshot_alert = "ok:{$n} localidade(s) registradas para " . date('m/Y') . '.';
+    } catch (\Throwable $e) {
+        $snapshot_alert = 'err:' . $e->getMessage();
+    }
+}
+
 $totals      = PluginCustomdashboardDashboard::getSummaryTotals();
 $all_loc     = PluginCustomdashboardDashboard::getAllStatusesByLocation();
 $contratos   = PluginCustomdashboardDashboard::getRentedMachinesByContract();
+$history_raw = PluginCustomdashboardDashboard::getStockHistory();         // array plano — filtrado no JS
 
 Html::header('Dashboard Máquinas', '', 'tools', 'PluginCustomdashboardDashboard');
 
@@ -15,6 +28,7 @@ $default_statuses = ['Estoque', 'Manutenção'];
 // ── Todos os status reais vindos do banco ───────────────────────────────────
 $all_statuses = $all_loc['all_statuses'];   // ordenados por volume total
 $loc_data     = $all_loc['locations'];      // ['São Paulo' => ['Estoque'=>10, ...], ...]
+$loc_colors   = PluginCustomdashboardDashboard::getLocationColors(array_keys($loc_data));
 
 // ── Datasets do gráfico — um por status, visibilidade inicial = $default_statuses ──
 $chart_loc_labels = json_encode(array_keys($loc_data));
@@ -118,6 +132,20 @@ function cdStatusColor(string $status, string $type = 'badge'): string {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
 <div class="container-fluid cd-dashboard p-4">
+
+    <!-- Feedback do snapshot -->
+    <?php if ($snapshot_alert !== ''):
+        $is_ok  = str_starts_with($snapshot_alert, 'ok:');
+        $msg    = substr($snapshot_alert, 3);
+    ?>
+    <div class="alert alert-<?php echo $is_ok ? 'success' : 'danger'; ?> alert-dismissible mb-3">
+        <i class="ti ti-<?php echo $is_ok ? 'circle-check' : 'alert-circle'; ?> me-2"></i>
+        <?php echo $is_ok
+            ? 'Snapshot registrado: ' . htmlspecialchars($msg)
+            : 'Erro ao registrar snapshot: ' . htmlspecialchars($msg); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    <?php endif; ?>
 
     <!-- Cabeçalho -->
     <div class="d-flex align-items-center mb-4">
@@ -286,6 +314,48 @@ function cdStatusColor(string $status, string $type = 'badge'): string {
                     <?php endif; ?>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ── Histórico de Estoque ─────────────────────────────────────────── -->
+    <div class="card mb-4">
+        <div class="card-header d-flex align-items-center flex-wrap gap-2">
+            <h3 class="card-title mb-0">
+                <i class="ti ti-trending-up me-2 text-blue"></i>Histórico de Estoque por Localidade
+            </h3>
+            <!-- Filtros de período (visíveis apenas se houver dados) -->
+            <?php if (!empty($history_raw)): ?>
+            <div class="btn-group btn-group-sm ms-2" id="cdHistFilter" role="group"
+                 aria-label="Período do histórico">
+                <button type="button" class="btn btn-outline-primary" data-period="7d">7 dias</button>
+                <button type="button" class="btn btn-outline-primary active" data-period="30d">30 dias</button>
+                <button type="button" class="btn btn-outline-primary" data-period="monthly">Mensal</button>
+            </div>
+            <?php endif; ?>
+            <div class="ms-auto">
+                <form method="POST" class="d-inline">
+                    <?php echo Html::hidden('_glpi_csrf_token',
+                        ['value' => Session::getNewCSRFToken()]); ?>
+                    <input type="hidden" name="action" value="snapshot">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="ti ti-camera me-1"></i>Registrar hoje
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div class="card-body">
+            <?php if (empty($history_raw)): ?>
+                <div class="text-center py-5 text-muted">
+                    <i class="ti ti-database-off" style="font-size:2.5rem;display:block;margin-bottom:.75rem;"></i>
+                    <p class="mb-1 fw-medium">Nenhum dado histórico ainda.</p>
+                    <p class="small mb-0">
+                        Clique em <strong>Registrar hoje</strong> para criar o primeiro snapshot.<br>
+                        A partir daí, o GLPI registra automaticamente todo dia via cron.
+                    </p>
+                </div>
+            <?php else: ?>
+                <canvas id="chartHistorico" style="width:100%;height:320px;"></canvas>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -495,6 +565,148 @@ document.addEventListener('DOMContentLoaded', function () {
                     x: { grid: { display: false } }
                 }
             }
+        });
+    }
+
+    // ── Gráfico Histórico de Estoque (linhas por localidade, filtro JS) ──
+    const ctxHistorico = document.getElementById('chartHistorico');
+    const historyRaw   = <?php echo json_encode($history_raw); ?>;
+    const locColors    = <?php echo json_encode($loc_colors); ?>;
+
+    let cdHistChart  = null;
+    let cdHistPeriod = '30d';
+
+    // Formata 'YYYY-MM-DD' → 'DD/MM'
+    function cdFmtDate(s) {
+        const p = s.split('-');
+        return `${p[2]}/${p[1]}`;
+    }
+    // Formata 'YYYY-MM' → 'Jan/25' etc.
+    const cdMonthNames = ['Jan','Fev','Mar','Abr','Mai','Jun',
+                          'Jul','Ago','Set','Out','Nov','Dez'];
+    function cdFmtMonth(ym) {
+        const p = ym.split('-');
+        return `${cdMonthNames[parseInt(p[1], 10) - 1]}/${p[0].slice(2)}`;
+    }
+
+    const cdPalette = [
+        '#4263eb','#2fb344','#f76707','#7048e8','#1098ad',
+        '#f59f00','#d6336c','#0ca678','#ea580c','#7c3aed'
+    ];
+
+    function cdBuildHistory(period) {
+        let locMap    = {};   // location → label → count
+        let rawLabels = [];
+
+        if (period === '7d' || period === '30d') {
+            const days   = period === '7d' ? 7 : 30;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - days + 1);
+            const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+            const filtered = historyRaw.filter(r => r.date >= cutoffStr);
+            rawLabels = [...new Set(filtered.map(r => r.date))].sort();
+
+            filtered.forEach(r => {
+                if (!locMap[r.location]) locMap[r.location] = {};
+                locMap[r.location][r.date] = r.count;
+            });
+        } else {
+            // Mensal: agrega por YYYY-MM, último valor de cada mês por localidade
+            const monthSet = new Set();
+            historyRaw.forEach(r => {
+                const ym = r.date.slice(0, 7);
+                monthSet.add(ym);
+                if (!locMap[r.location]) locMap[r.location] = {};
+                // dados chegam ordenados por data ASC → o último sobrescreve (mais recente)
+                locMap[r.location][ym] = r.count;
+            });
+            rawLabels = [...monthSet].sort().slice(-12);
+        }
+
+        if (!rawLabels.length) return { labels: [], datasets: [] };
+
+        const dispLabels = period === 'monthly'
+            ? rawLabels.map(cdFmtMonth)
+            : rawLabels.map(cdFmtDate);
+
+        // Ordena localidades pelo total acumulado no período (desc)
+        const locations = Object.keys(locMap).sort((a, b) => {
+            const ta = rawLabels.reduce((s, l) => s + (locMap[a][l] ?? 0), 0);
+            const tb = rawLabels.reduce((s, l) => s + (locMap[b][l] ?? 0), 0);
+            return tb - ta;
+        });
+
+        const datasets = locations.map((loc, i) => {
+            const color = locColors[loc] || cdPalette[i % cdPalette.length];
+            return {
+                label:            loc,
+                data:             rawLabels.map(l => locMap[loc][l] ?? null),
+                borderColor:      color,
+                backgroundColor:  color + '22',
+                tension:          0.35,
+                fill:             false,
+                pointRadius:      period === 'monthly' ? 5 : 3,
+                pointHoverRadius: 7,
+                spanGaps:         true,
+            };
+        });
+
+        return { labels: dispLabels, datasets };
+    }
+
+    if (ctxHistorico && historyRaw.length) {
+        const initial = cdBuildHistory(cdHistPeriod);
+        ctxHistorico.style.height = '320px';
+
+        cdHistChart = new Chart(ctxHistorico, {
+            type: 'line',
+            data: { labels: initial.labels, datasets: initial.datasets },
+            options: {
+                responsive:          true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12, boxHeight: 12,
+                            borderRadius: 3, useBorderRadius: true,
+                            font: { size: 11 }, padding: 14,
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            footer: (items) => 'Total: ' +
+                                items.reduce((s, i) => s + (i.raw ?? 0), 0)
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        ticks:  { precision: 0 },
+                        grid:   { color: 'rgba(0,0,0,0.05)' },
+                        title:  { display: true, text: 'Qtd. em Estoque',
+                                  font: { size: 11 }, color: '#6b7280' }
+                    },
+                    x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                }
+            }
+        });
+
+        // Botões de filtro de período
+        document.querySelectorAll('#cdHistFilter button').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                document.querySelectorAll('#cdHistFilter button')
+                    .forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                cdHistPeriod = this.dataset.period;
+                const built = cdBuildHistory(cdHistPeriod);
+                cdHistChart.data.labels   = built.labels;
+                cdHistChart.data.datasets = built.datasets;
+                cdHistChart.update();
+            });
         });
     }
 
