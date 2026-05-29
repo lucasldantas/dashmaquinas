@@ -294,6 +294,9 @@ class PluginCustomdashboardDashboard extends CommonGLPI {
     static function getStockHistory(): array {
         global $DB;
 
+        // Garante que a tabela existe e tem o schema atual (migra se necessário)
+        plugin_customdashboard_create_history_table();
+
         if (!$DB->tableExists('glpi_plugin_customdashboard_stockhistory')) {
             return [];
         }
